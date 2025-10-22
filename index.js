@@ -5,7 +5,7 @@ import cors from 'cors';
 import 'dotenv/config';
 import mongoose from 'mongoose';
 import dotenv from 'dotenv';
-import chatSocket from './socket/chatSocket.js';
+import chatSocket from './backend/socket/chatSocket.js';
 import userRouter from './backend/routes/userAuthRoutes.js';
 
 
