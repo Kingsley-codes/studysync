@@ -33,7 +33,6 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' })); // Parse JSON bodies
 app.use(express.urlencoded({ extended: true })); // Parse URL-encoded form data
-app.use(passport.initialize());
 
 
 // ✅ MongoDB Connection
