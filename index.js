@@ -7,6 +7,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import chatSocket from './backend/socket/chatSocket.js';
 import userRouter from './backend/routes/userAuthRoutes.js';
+import aiChatRouter from './backend/routes/aiChatRoutes.js';
 
 
 dotenv.config();
@@ -54,7 +55,7 @@ app.get('/', (req, res) => {
 
 // Routes
 app.use('/api/auth', userRouter);
-app.use('/api/ai', userRouter);
+app.use('/api/ai', aiChatRouter);
 
 
 // Error handling middleware
