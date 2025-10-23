@@ -1,5 +1,5 @@
 import express from "express";
-import { callDeepSeekAPI, getChatHistory, getUserConversations } from "../controllers/aiController";
+import { callDeepSeekAPI, getChatHistory, getUserConversations } from "../controllers/aiController.js";
 
 
 const aiChatRouter = express.Router();

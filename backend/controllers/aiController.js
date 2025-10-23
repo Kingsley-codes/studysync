@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { Conversation } from '../models/aiChatModel';
+import { Conversation } from '../models/aiChatModel.js';
 
 const DEEPSEEK_URL = process.env.DEEPSEEK_API_URL;
 
