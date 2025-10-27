@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import chatSocket from './backend/socket/chatSocket.js';
 import userRouter from './backend/routes/userAuthRoutes.js';
 import aiChatRouter from './backend/routes/aiChatRoutes.js';
+import { initPinecone } from './backend/scripts/initPinecone.js';
 
 
 dotenv.config();
@@ -26,6 +27,11 @@ const MONGO_URI = process.env.MONGO_URI;
 
 // Use separate file for socket events
 chatSocket(io);
+
+// Initialize Pinecone when server starts
+initPinecone().then(() => {
+    console.log('Pinecone initialization completed');
+});
 
 // ✅ Middlewares (before routes)
 app.use(cors({
