@@ -84,6 +84,8 @@ export const registerUser = async (req, res) => {
       });
     }
 
+    //soe
+
     // Respond with success
     res.status(201).json({
       status: "success",
