@@ -5,8 +5,8 @@ import * as pdf from 'pdf-parse';
 import mongoose from 'mongoose';
 
 
-const DEEPSEEK_URL = process.env.DEEPSEEK_API_URL;
-const DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY; // Add this line
+const GROQ_URL = process.env.GROQ_URL;
+const GROQ_API_KEY = process.env.GROQ_API_KEY; // Add this line
 
 
 // ✅ Helper function to extract text from PDF buffer
@@ -236,76 +236,65 @@ const extractTopic = (message, context) => {
     return message.split(' ').slice(0, 5).join(' ').replace('?', '');
 };
 
-// Enhanced handleAIChat function with RAG storage
+
 export const handleAIChat = async (req, res) => {
     try {
         const userID = req.user;
-        console.log(userID);
 
-        if (!userID) return res.status(403).json({
-            success: false,
-            message: "You are Unauthorized"
-        });
+        if (!userID)
+            return res.status(403).json({
+                success: false,
+                message: "You are Unauthorized",
+            });
 
-        // ✅ Handle both JSON and FormData
-        let { message, action = 'auto', chatId } = req.body;
-        const file = req.file; // From multer middleware
+        let { message, action = "auto", chatId } = req.body;
+        const file = req.file;
 
-        // ✅ If file is uploaded, extract text from PDF
-        let extractedText = '';
+        // ✅ 1. Handle PDF upload and text extraction
+        let extractedText = "";
         if (file) {
-            if (file.mimetype === 'application/pdf') {
+
+            if (file.mimetype === "application/pdf") {
                 extractedText = await extractTextFromPDF(file.buffer);
-                // Use extracted text as the message
                 message = extractedText;
             } else {
-                return res.status(400).json({ error: 'Only PDF files are supported' });
+                return res.status(400).json({ error: "Only PDF files are supported" });
             }
         }
 
         if (!message && !file) {
-            return res.status(400).json({ error: 'Message or file is required' });
+            return res.status(400).json({ error: "Message or file is required" });
         }
 
-        // ✅ Enable Server-Sent Events (streaming)
-        // res.setHeader("Content-Type", "text/event-stream");
-        // res.setHeader("Cache-Control", "no-cache");
-        // res.setHeader("Connection", "keep-alive");
-        // res.flushHeaders();
-
-        // ✅ Get or create conversation
+        // ✅ 2. Get or create conversation
         let context = await Conversation.findOne({ _id: chatId, userID });
         let isNewConversation = false;
 
         if (!context) {
-            // ✅ Generate title for new conversation
             const conversationTitle = await generateConversationTitle(message);
-
             context = await Conversation.create({
                 userID,
                 originalText: "",
                 conversation: [],
                 hasSummary: false,
-                title: conversationTitle
+                title: conversationTitle,
             });
             isNewConversation = true;
+            console.log("🆕 New conversation created:", context._id);
         }
 
-        // ✅ Track first content for summary logic
+        // ✅ 3. Detect and handle first content submission
         if (!context.hasSummary && isLikelyContentSubmission(message)) {
             context.originalText = message;
             context.hasSummary = true;
 
-            // ✅ Store in Pinecone for RAG (non-blocking)
-            ragService.storeConversationChunks(
-                context._id.toString(),
-                message,
-                { type: 'original_content', userID: userID.toString() }
-            ).catch(error => {
-                console.error('Failed to store in Pinecone:', error);
-            });
+            ragService
+                .storeConversationChunks(context._id.toString(), message, {
+                    type: "original_content",
+                    userID: userID.toString(),
+                })
+                .catch((error) => console.error("Failed to store in Pinecone:", error));
 
-            // ✅ Update title if it's a content-based conversation
             if (isNewConversation) {
                 context.title = await generateContentBasedTitle(message);
             }
@@ -313,117 +302,151 @@ export const handleAIChat = async (req, res) => {
             await context.save();
         }
 
-        // ✅ Build conversation history (last 10 messages)
-        let history = context.conversation.slice(-10)
-            .map(msg => ({
-                role: msg.role,
-                content: msg.content
-            }));
-
-        // ✅ Generate advanced prompt with RAG
+        // ✅ 4. Craft the intelligent final prompt with RAG context
         const finalPrompt = await craftIntelligentPrompt(message, context, action);
-        history.push({ role: "user", content: finalPrompt });
 
-        // ✅ STREAM Ai Response
-        // let fullResponse = "";
-        // await callDeepSeekAPI(history, (token) => {
-        //     fullResponse += token;
-        //     res.write(`data: ${token}\n\n`);
-        // });
+        // ✅ 5. Build conversation messages for DeepSeek API
+        const messagesForAPI = [];
 
-        // ✅ Ensure history only contains plain strings. only needed for non-streaming
-        const safeHistory = history.map(msg => ({
-            role: String(msg.role),
-            content: String(msg.content)
-        }));
+        // Add conversation history if it exists
+        if (context.conversation && context.conversation.length > 0) {
+            const recentMessages = context.conversation.slice(-10);
 
-        // Call DeepSeek API without streaming
-        const fullResponse = await callDeepSeekAPI(safeHistory);
+            for (const msg of recentMessages) {
+                messagesForAPI.push({
+                    role: String(msg.role || 'user'),
+                    content: String(msg.content || '')
+                });
+            }
+        }
 
+        // Add the current user message
+        messagesForAPI.push({
+            role: "user",
+            content: finalPrompt
+        });
 
-        // ✅ Save to DB after stream ends
+        // ✅ 6. Call Groq API with the properly formatted array
+        const fullResponse = await callGroqAPI(messagesForAPI);
+
+        // ✅ 7. Save chat to conversation history
         context.conversation.push(
-            { role: "user", content: message },
+            { role: "user", content: message }, // Store original message, not finalPrompt
             { role: "assistant", content: fullResponse }
         );
         await context.save();
 
-        // ✅ Store the assistant's response in Pinecone for future context (non-blocking)
+        // ✅ 8. Store AI response in Pinecone (non-blocking)
         if (context.hasSummary && fullResponse.length > 50) {
-            ragService.storeConversationChunks(
-                context._id.toString(),
-                fullResponse,
-                { type: 'assistant_response', userID: userID.toString() }
-            ).catch(console.error);
+            ragService
+                .storeConversationChunks(context._id.toString(), fullResponse, {
+                    type: "assistant_response",
+                    userID: userID.toString(),
+                })
+                .catch(console.error);
         }
 
-        // ✅ Send conversation metadata for new conversations
-        if (isNewConversation) {
-            res.write(`data: [CONVERSATION_CREATED]${JSON.stringify({
+        // ✅ 9. Return success response
+        res.status(200).json({
+            success: true,
+            data: {
+                response: fullResponse,
                 chatId: context._id,
-                title: context.title
-            })}\n\n`);
-        }
-
-        res.write(`data: [DONE]\n\n`);
-        res.end();
-
+                title: context.title,
+                isNewConversation,
+            },
+        });
     } catch (error) {
         console.error("AI Chat Error:", error);
         if (!res.headersSent) {
-            res.status(500).json({ error: "Failed to process request", details: error.message });
+            res.status(500).json({
+                error: "Failed to process request",
+                details: error.message,
+            });
         }
     }
 };
 
 
-export const callDeepSeekAPI = async (messages, onToken) => {
-    const response = await axios({
-        method: 'POST',
-        url: DEEPSEEK_URL,
-        data: {
-            model: 'deepseek-chat',
-            messages,
+export const callGroqAPI = async (messages) => {
+    try {
+        // ✅ Validate messages parameter
+        if (!messages) {
+            throw new Error("Messages parameter is undefined");
+        }
+
+        if (!Array.isArray(messages)) {
+            console.error("❌ Messages is not an array. Actual type:", typeof messages);
+            console.error("❌ Messages value:", messages);
+            throw new Error(`Messages must be an array. Received: ${typeof messages}`);
+        }
+
+        if (messages.length === 0) {
+            throw new Error("Messages array cannot be empty");
+        }
+
+        // ✅ Validate each message in the array
+        for (let i = 0; i < messages.length; i++) {
+            const msg = messages[i];
+            if (!msg || typeof msg !== 'object') {
+                throw new Error(`Message at index ${i} is invalid or not an object`);
+            }
+            if (!msg.role || typeof msg.role !== 'string') {
+                throw new Error(`Message at index ${i} is missing role or role is not a string`);
+            }
+            if (!msg.content || typeof msg.content !== 'string') {
+                throw new Error(`Message at index ${i} is missing content or content is not a string`);
+            }
+
+            // Validate role is either 'user' or 'assistant'
+            if (!['user', 'assistant'].includes(msg.role)) {
+                throw new Error(`Message at index ${i} has invalid role: ${msg.role}. Must be 'user' or 'assistant'`);
+            }
+        }
+
+        // ✅ Create payload with proper validation
+        const payload = {
+            // Choose one of these current models:
+            model: "llama-3.1-8b-instant", // Fast and efficient
+            // model: "llama-3.1-70b-versatile", // More powerful but slower
+            // model: "mixtral-8x7b-32768", // Good for complex tasks
+            messages: messages, // This should now be a valid array
             temperature: 0.7,
             max_tokens: 2000,
-            stream: true,
-        },
-        headers: {
-            'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
-            'Content-Type': 'application/json',
-        },
-        responseType: 'stream'
-    });
+            stream: false,
+        };
 
-    return new Promise((resolve, reject) => {
-        let fullResponse = "";
+        console.log("✅ Payload validated successfully");
+        console.log("📤 Sending to DeepSeek API...");
 
-        response.data.on('data', (chunk) => {
-            const lines = chunk.toString().split('\n').filter(line => line.trim());
-            for (const line of lines) {
-                if (!line.startsWith("data:")) continue;
-
-                const data = line.replace("data:", "").trim();
-                if (data === "[DONE]") {
-                    return resolve(fullResponse);
-                }
-
-                try {
-                    const json = JSON.parse(data);
-                    const token = json?.choices?.[0]?.delta?.content;
-                    if (token) {
-                        fullResponse += token;
-                        if (onToken) onToken(token); // ✅ Stream token to caller
-                    }
-                } catch (err) {
-                    console.error("Streaming JSON parse error:", err);
-                }
-            }
+        const response = await axios({
+            method: "POST",
+            url: GROQ_URL,
+            data: payload,
+            headers: {
+                Authorization: `Bearer ${GROQ_API_KEY}`,
+                "Content-Type": "application/json",
+            },
+            timeout: 30000,
         });
 
-        response.data.on('end', () => resolve(fullResponse));
-        response.data.on('error', (err) => reject(err));
-    });
+        const aiReply = response.data?.choices?.[0]?.message?.content || "";
+        console.log("✅ DeepSeek response received. Length:", aiReply.length);
+        return aiReply;
+    } catch (error) {
+        console.error("❌ DeepSeek API call failed:", error.message);
+
+        if (error.response) {
+            console.error("Status:", error.response.status);
+            console.error("Response Data:", JSON.stringify(error.response.data, null, 2));
+        } else if (error.request) {
+            console.error("No response received from DeepSeek API");
+        } else {
+            console.error("Error setting up request:", error.message);
+        }
+
+        throw new Error(`Failed to fetch response from DeepSeek API: ${error.message}`);
+    }
 };
 
 
