@@ -8,6 +8,7 @@ import dotenv from 'dotenv';
 import chatSocket from './backend/socket/chatSocket.js';
 import userRouter from './backend/routes/userAuthRoutes.js';
 import aiChatRouter from './backend/routes/aiChatRoutes.js';
+import chatroomRouter from './backend/routes/chatroomRoutes.js';
 import { initPinecone } from './backend/scripts/initPinecone.js';
 
 
@@ -47,7 +48,7 @@ app.use(express.urlencoded({ extended: true })); // Parse URL-encoded form data
 
 // ✅ MongoDB Connection
 try {
-    await mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+    await mongoose.connect(MONGO_URI);
     console.log("✅ MongoDB Connected");
 } catch (error) {
     console.error("❌ MongoDB Connection Error:", error);
@@ -65,6 +66,7 @@ app.get('/', (req, res) => {
 // Routes
 app.use('/api/auth', userRouter);
 app.use('/api/ai', aiChatRouter);
+app.use('/api/chatroom', chatroomRouter);
 
 
 // Error handling middleware

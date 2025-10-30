@@ -28,6 +28,10 @@ const userSchema = new mongoose.Schema(
       required: true,
       minlength: 8,
     },
+    chatrooms: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Chatroom"
+    }],
     profilePhoto: {
       publicId: { type: String },
       url: { type: String }

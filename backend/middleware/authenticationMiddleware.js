@@ -23,7 +23,7 @@ export const userAuthenticate = async (req, res, next) => {
         const currentUser = await User.findById(decoded.id);
         if (!currentUser) throw new Error("User not found");
 
-        req.user = currentUser;
+        req.user = currentUser._id;
         next();
     } catch (err) {
         console.error("Protect error:", err);
