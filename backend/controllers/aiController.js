@@ -268,10 +268,10 @@ export const handleAIChat = async (req, res) => {
         }
 
         // ✅ Enable Server-Sent Events (streaming)
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache");
-        res.setHeader("Connection", "keep-alive");
-        res.flushHeaders();
+        // res.setHeader("Content-Type", "text/event-stream");
+        // res.setHeader("Cache-Control", "no-cache");
+        // res.setHeader("Connection", "keep-alive");
+        // res.flushHeaders();
 
         // ✅ Get or create conversation
         let context = await Conversation.findOne({ _id: chatId, userID });
@@ -325,11 +325,21 @@ export const handleAIChat = async (req, res) => {
         history.push({ role: "user", content: finalPrompt });
 
         // ✅ STREAM Ai Response
-        let fullResponse = "";
-        await callDeepSeekAPI(history, (token) => {
-            fullResponse += token;
-            res.write(`data: ${token}\n\n`);
-        });
+        // let fullResponse = "";
+        // await callDeepSeekAPI(history, (token) => {
+        //     fullResponse += token;
+        //     res.write(`data: ${token}\n\n`);
+        // });
+
+        // ✅ Ensure history only contains plain strings. only needed for non-streaming
+        const safeHistory = history.map(msg => ({
+            role: String(msg.role),
+            content: String(msg.content)
+        }));
+
+        // Call DeepSeek API without streaming
+        const fullResponse = await callDeepSeekAPI(safeHistory);
+
 
         // ✅ Save to DB after stream ends
         context.conversation.push(
